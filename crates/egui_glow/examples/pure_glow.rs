@@ -233,7 +233,7 @@ fn main() {
 
                 let event_response = egui_glow.on_event(&event);
 
-                if event_response.repaint {
+                if event_response.repaint && *control_flow != winit::event_loop::ControlFlow::Exit {
                     redraw(&mut egui_glow, control_flow);
                 }
             }
