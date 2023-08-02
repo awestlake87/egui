@@ -150,58 +150,67 @@ fn main() {
     let gl = std::sync::Arc::new(gl);
 
     let mut egui_glow = egui_glow::EguiGlow::new(&event_loop, gl.clone(), None);
+    egui_glow
+        .egui_ctx
+        .set_pixels_per_point(gl_window.window().scale_factor() as f32);
 
     event_loop.run(move |event, _, control_flow| {
-        let mut redraw = || {
-            let mut quit = false;
+        let mut redraw =
+            |egui_glow: &mut egui_glow::EguiGlow,
+             control_flow: &mut winit::event_loop::ControlFlow| {
+                let mut quit = false;
 
-            let repaint_after = egui_glow.run(gl_window.window(), |egui_ctx| {
-                egui::SidePanel::left("my_side_panel").show(egui_ctx, |ui| {
-                    ui.heading("Hello World!");
-                    if ui.button("Quit").clicked() {
-                        quit = true;
-                    }
-                    ui.color_edit_button_rgb(&mut clear_color);
+                let repaint_after = egui_glow.run(gl_window.window(), |egui_ctx| {
+                    egui::SidePanel::left("my_side_panel").show(egui_ctx, |ui| {
+                        ui.heading("Hello World!");
+                        if ui.button("Quit").clicked() {
+                            quit = true;
+                        }
+                        ui.color_edit_button_rgb(&mut clear_color);
+                    });
                 });
-            });
 
-            *control_flow = if quit {
-                winit::event_loop::ControlFlow::Exit
-            } else if repaint_after.is_zero() {
-                gl_window.window().request_redraw();
-                winit::event_loop::ControlFlow::Poll
-            } else if let Some(repaint_after_instant) =
-                std::time::Instant::now().checked_add(repaint_after)
-            {
-                winit::event_loop::ControlFlow::WaitUntil(repaint_after_instant)
-            } else {
-                winit::event_loop::ControlFlow::Wait
-            };
+                *control_flow = if quit {
+                    winit::event_loop::ControlFlow::Exit
+                } else if repaint_after.is_zero() {
+                    gl_window.window().request_redraw();
+                    winit::event_loop::ControlFlow::Poll
+                } else if let Some(repaint_after_instant) =
+                    std::time::Instant::now().checked_add(repaint_after)
+                {
+                    winit::event_loop::ControlFlow::WaitUntil(repaint_after_instant)
+                } else {
+                    winit::event_loop::ControlFlow::Wait
+                };
 
-            {
-                unsafe {
-                    use glow::HasContext as _;
-                    gl.clear_color(clear_color[0], clear_color[1], clear_color[2], 1.0);
-                    gl.clear(glow::COLOR_BUFFER_BIT);
+                {
+                    unsafe {
+                        use glow::HasContext as _;
+                        gl.clear_color(clear_color[0], clear_color[1], clear_color[2], 1.0);
+                        gl.clear(glow::COLOR_BUFFER_BIT);
+                    }
+
+                    // draw things behind egui here
+
+                    egui_glow.paint(gl_window.window());
+
+                    // draw things on top of egui here
+
+                    gl_window.swap_buffers().unwrap();
+                    gl_window.window().set_visible(true);
                 }
-
-                // draw things behind egui here
-
-                egui_glow.paint(gl_window.window());
-
-                // draw things on top of egui here
-
-                gl_window.swap_buffers().unwrap();
-                gl_window.window().set_visible(true);
-            }
-        };
+            };
 
         match event {
             // Platform-dependent event handlers to workaround a winit bug
             // See: https://github.com/rust-windowing/winit/issues/987
             // See: https://github.com/rust-windowing/winit/issues/1619
-            winit::event::Event::RedrawEventsCleared if cfg!(windows) => redraw(),
-            winit::event::Event::RedrawRequested(_) if !cfg!(windows) => redraw(),
+            winit::event::Event::RedrawEventsCleared if cfg!(windows) => {
+                redraw(&mut egui_glow, control_flow)
+            }
+            winit::event::Event::RedrawRequested(_) if !cfg!(windows) => {
+                redraw(&mut egui_glow, control_flow)
+            }
 
             winit::event::Event::WindowEvent { event, .. } => {
                 use winit::event::WindowEvent;
@@ -212,16 +221,20 @@ fn main() {
                 if let winit::event::WindowEvent::Resized(physical_size) = &event {
                     gl_window.resize(*physical_size);
                 } else if let winit::event::WindowEvent::ScaleFactorChanged {
-                    new_inner_size, ..
+                    new_inner_size,
+                    scale_factor,
                 } = &event
                 {
                     gl_window.resize(**new_inner_size);
+                    egui_glow
+                        .egui_ctx
+                        .set_pixels_per_point(*scale_factor as f32)
                 }
 
                 let event_response = egui_glow.on_event(&event);
 
                 if event_response.repaint {
-                    gl_window.window().request_redraw();
+                    redraw(&mut egui_glow, control_flow);
                 }
             }
             winit::event::Event::LoopDestroyed => {
